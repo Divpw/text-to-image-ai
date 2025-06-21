@@ -1,192 +1,180 @@
-# Enhanced Text-to-Image AI with Stable Diffusion
+# Ultra-Professional AI Image Generation System with Stable Diffusion & SDXL
 
-This project provides a comprehensive system to generate high-quality images from text prompts using Stable Diffusion. It features a user-friendly Gradio interface runnable on Google Colab (free GPU) or locally, and an optional FastAPI backend for programmatic access.
+Welcome to an advanced AI image generation system designed for high-quality output and a professional user experience. This project leverages Stable Diffusion (including SDXL models), Real-ESRGAN for upscaling, and offers multiple interfaces: a Google Colab notebook, a local Gradio application, and a FastAPI backend. It's built with a focus on free-tier GPU compatibility (like Colab's T4), reproducibility, and ease of use.
 
-## ✨ Key Features
+## ✨ Core Features
 
--   **Advanced Gradio UI:**
-    -   Modern 2-column layout: Inputs on the left, image output on the right.
-    -   **Prompt Controls:** Main prompt, negative prompt.
-    -   **Style Presets:** Dropdown for styles like Realistic, Anime, Fantasy Art, Digital Painting, 3D Render.
-    -   **Generation Parameters:** Sliders for Inference Steps (10-100) and CFG Scale (1.0-20.0).
-    -   **Seed Control:** Input field for seed, with a "Randomize Seed" button.
-    -   **Loading Indicators:** Visual feedback during image generation.
--   **Output Management:**
-    -   Displays generated image with timestamp, seed, model info, and suggested filename.
-    -   Download button for the generated image.
-    -   **Custom Filename Prefix:** Option to specify a prefix for downloaded/saved files.
-    -   **(Colab Only) Save to Google Drive:** Option to automatically save generated images to your Google Drive.
--   **Backend Flexibility:**
-    -   **`main.ipynb`:** Google Colab notebook for easy setup and execution on free GPUs. Generates a public shareable link.
-    -   **`app.py`:** Python script for running the Gradio application locally, supporting command-line arguments for configuration.
-    -   **`api.py` (Optional):** FastAPI server providing a POST endpoint (`/generate/`) for programmatic image generation and a GET endpoint (`/health/`) for status checks.
--   **Stable Diffusion Integration:**
-    -   Utilizes HuggingFace `diffusers` library.
-    -   Defaults to `runwayml/stable-diffusion-v1-5` for compatibility with free Colab T4 GPUs.
-    -   Supports changing to other models (including SDXL, VRAM permitting) by modifying the model ID in `main.ipynb` (Cell 4), `app.py` (via CLI argument `--model_id` or experimental UI feature), and `api.py` (via `API_DEFAULT_MODEL_ID` env var).
-    -   No paid Hugging Face tokens required for default operation.
+-   **GitHub-Synced Colab Notebook (`main.ipynb`):**
+    -   Automatically clones or pulls the latest code from your specified GitHub repository on startup, ensuring you're always running the most up-to-date version.
+    -   Optimized for Google Colab's free tier GPUs (T4, P100).
+-   **Advanced Diffusion Model Handling:**
+    -   **SDXL Prioritization:** Attempts to load SDXL models (e.g., `stabilityai/sdxl-base-1.0`) for superior image quality.
+    -   **SD 1.5 Fallback:** Automatically falls back to Stable Diffusion 1.5 (e.g., `runwayml/stable-diffusion-v1-5`) if SDXL fails (e.g., due to VRAM limits), ensuring functionality on various GPU tiers.
+    -   Memory-efficient loading using `torch.float16` and attention slicing where applicable.
+-   **Ultra High-Quality Output:**
+    -   **Real-ESRGAN Upscaling:** Optional x4 image upscaling using Real-ESRGAN for significantly sharper and more detailed final images.
+    -   Selectable image dimensions (e.g., 512x512, 768x768, 1024x1024) to balance quality and generation speed.
+-   **Polished Gradio User Interface (`main.ipynb` & `app.py`):**
+    -   Clean, responsive 2-column layout (Inputs | Output).
+    -   **Comprehensive Prompt Controls:**
+        -   Main prompt and negative prompt textboxes.
+        -   Curated style presets: "Realistic", "Cyberpunk", "Anime", "Watercolor", "3D Render".
+        -   Sliders for Inference Steps (10-50) and CFG Scale (1.0-15.0).
+        -   Seed input with a "Randomize Seed" button (-1 for random).
+    -   Loading spinners and status messages for a smooth user experience.
+    -   Aesthetic styling for a professional look and feel.
+-   **Rich Output Features:**
+    -   Image preview with detailed generation info: final size, timestamp, seed, model used, style, and logs.
+    -   Download button for the final (potentially upscaled) image with a descriptive filename (e.g., `[prompt_prefix]_WxH_[upscaled_]seed_timestamp.png`).
+    -   **(Colab Only)** Option to save images directly to your Google Drive.
+-   **Flexible Deployment:**
+    -   **`app.py`:** Run the Gradio app locally with extensive CLI arguments for customization.
+    -   **`api.py` (Optional):** FastAPI server for programmatic image generation via a `POST /generate/` endpoint, supporting all key features including SDXL, dimensions, and upscaling. Includes a `/health/` check.
+-   **Free & Open:**
+    -   Designed to work entirely on free resources (no paid Hugging Face tokens required for core functionality).
+    -   Well-commented code for easy understanding and modification.
 
 ## 📂 Project Structure
 
--   `main.ipynb`: The primary Google Colab notebook with all UI enhancements and Google Drive integration.
--   `app.py`: Python script for running the Gradio UI locally.
--   `api.py`: Optional FastAPI server for programmatic image generation.
--   `README.md`: This file, providing an overview, setup, and usage instructions.
+-   `main.ipynb`: The primary Google Colab notebook. **Start here for the easiest experience.**
+-   `app.py`: Python script for running the Gradio UI locally on your machine.
+-   `api.py`: Optional FastAPI server for developers looking to integrate image generation into other applications.
+-   `README.md`: This file.
+-   *(Potentially other utility scripts or a `requirements.txt` if added to the synced GitHub repo).*
 
 ## 🚀 Setup and Usage
 
-### 1. Google Colab (`main.ipynb`) - Recommended for easy start
+### 1. Google Colab (`main.ipynb`) - Recommended Path
 
-1.  **Open in Colab:**
-    *   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yourusername/your-repo-name/blob/main/main.ipynb)  *(Replace with your actual GitHub repo link after creation if this project is hosted on GitHub)*
-    *   Alternatively, go to [Google Colab](https://colab.research.google.com/), select `File` -> `Upload notebook...`, and upload the `main.ipynb` file from this repository.
+This is the most straightforward way to use the system, especially with free GPU access.
 
-2.  **Enable GPU:**
-    *   In Colab: `Runtime` -> `Change runtime type` -> Select `GPU` (e.g., T4) from the "Hardware accelerator" dropdown. Click `Save`.
+1.  **Fork the Repository (Crucial First Step if you want to customize):**
+    *   If you intend to modify or manage your own version of the `app.py` or other scripts that `main.ipynb` might pull, **fork the original GitHub repository** to your own GitHub account.
+    *   The Colab notebook will be configured to pull from a GitHub repo.
 
-3.  **Run the Cells:**
-    *   Execute cells in `main.ipynb` sequentially by clicking the "play" button on each cell or using `Shift+Enter`.
-    *   **Cell 1:** Installs necessary Python libraries. This may take a few minutes.
-    *   **Cell 2:** Imports libraries and defines helper functions, style presets, Google Drive functions, and the core image generation logic.
-    *   **Cell 3:** Defines the Gradio User Interface structure.
-    *   **Cell 4:** Loads the chosen Stable Diffusion model. The default is `runwayml/stable-diffusion-v1-5`. You can edit this cell to choose a different model ID. Model downloading and loading can take several minutes, especially on the first run for a new model.
-    *   **Cell 5:** Launches the Gradio interface. Wait for a public URL (usually ending in `gradio.live` or `gradio.app`) to appear in the cell output. Click this URL to open the UI in a new browser tab.
+2.  **Open `main.ipynb` in Colab:**
+    *   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/YOUR_USERNAME/YOUR_REPO/blob/main/main.ipynb)
+        *(**Important:** Replace `YOUR_USERNAME/YOUR_REPO` with the actual path to **your forked repository** or the main project repository if you are just running it.)*
+    *   Alternatively, download `main.ipynb` and upload it to Colab (`File` -> `Upload notebook...`).
 
-4.  **Using the Interface (`main.ipynb`):**
-    *   The UI is organized into a 2-column layout.
-    *   **Left Column (Inputs):**
-        *   Enter your main **Prompt** and an optional **Negative Prompt**.
-        *   Select an **Artistic Style Preset** from the dropdown.
-        *   Adjust **Inference Steps** and **CFG Scale (Guidance)** using the sliders.
-        *   Enter a specific **Seed** number or click "🎲 Randomize Seed" for a random one.
-        *   Under "Output Options":
-            *   Enter a **Custom Filename Prefix** if desired.
-            *   Check **"Save to Google Drive"** if you want to save the image to your Google Drive. The first time you use this in a session, Colab will ask for permission to access your Drive. Images are saved to `My Drive/AI_Generated_Images/StableDiffusion/`.
-    *   Click the **"🖼️ Generate Image"** button.
-    *   **Right Column (Output):**
-        *   The generated image will appear here.
-        *   A "💾 Download Image" button will become active, allowing you to download the image. The filename will include your custom prefix (if any), model name, seed, and timestamp.
-        *   "Generation Info & Logs" will display details about the generation process, including the seed used, timestamp, model ID, style, final filename, and any messages related to Google Drive saving.
-    *   The "Status" bar at the top provides feedback on model loading and generation progress.
+3.  **Configure GitHub Repository URL in Colab:**
+    *   In the **first code cell** of `main.ipynb` (titled "1. Setup Environment & Sync with GitHub Repository"), **update the `GITHUB_REPO_URL` variable** to point to your repository URL.
+    *   Example: `GITHUB_REPO_URL = "https://github.com/YourGitHubUsername/YourForkedRepoName.git"`
+
+4.  **Enable GPU Accelerator:**
+    *   In Colab: `Runtime` -> `Change runtime type`.
+    *   Select `GPU` from the "Hardware accelerator" dropdown (T4 is common for free tier). Click `Save`.
+
+5.  **Run Cells Sequentially:**
+    *   Execute each cell in `main.ipynb` from top to bottom by clicking the "play" icon or using `Shift+Enter`.
+    *   **Cell 1 (Setup & Sync):** Clones your specified GitHub repo (or pulls updates if already cloned into `/content/AI_Art_Repo`).
+    *   **Cell 2 (Install Dependencies):** Installs Python libraries including `diffusers`, `realesrgan`, `gradio`, etc. This can take a few minutes.
+    *   **Cell 3 (Imports & Helpers):** Defines core functions, style presets, upscaler logic.
+    *   **Cell 4 (Define Gradio UI):** Sets up the structure of the web interface.
+    *   **Cell 5 (Load Main Diffusion Model):** Attempts to load SDXL, with fallback to SD1.5. This is a time-consuming step. Monitor console output.
+    *   **Cell 6 (Load Upscaler Model):** Loads the Real-ESRGAN model. Also takes time.
+    *   **Cell 7 (Launch Gradio UI):** Starts the Gradio app and provides a public URL (ending in `gradio.live` or `gradio.app`). Click this link.
+
+6.  **Using the Gradio Interface (Colab):**
+    *   **Left Panel (Controls):**
+        *   Input your **Prompt** and **Negative Prompt**.
+        *   Choose an **Artistic Style**.
+        *   Select **Image Dimensions**. Be mindful of VRAM; 1024x1024 with SDXL on a T4 GPU can be slow or cause errors. 512x512 or 512x768 are safer starting points for SDXL on T4. SD1.5 works best at 512x512.
+        *   Adjust **Inference Steps** and **CFG Scale**.
+        *   Set a **Seed** (-1 for random) or use "🎲 Randomize".
+        *   Optionally, provide a **Custom Filename Prefix**.
+        *   Toggle **"✨ Upscale Image (Real-ESRGAN x4)"**.
+        *   Toggle **"💾 Save to Google Drive"** (prompts for Drive access if needed). Images save to `My Drive/AI_Generated_Images/UltraProfessionalSD/`.
+    *   Click **"🖼️ Generate Image"**.
+    *   **Right Panel (Output):**
+        *   View the generated (and potentially upscaled) image.
+        *   Use the **"📥 Download Image"** button.
+        *   Check **"Generation Info & Logs"** for details.
+    *   The **Status Bar** at the top provides feedback during model loading and image processing.
 
 ### 2. Local Gradio App (`app.py`)
 
-For running the Gradio interface on your local machine (requires a suitable Python environment and preferably an NVIDIA GPU with CUDA).
+Run the advanced Gradio UI on your local machine.
 
-1.  **Prerequisites:**
-    *   Python 3.8+
-    *   Git (for cloning the repository)
-    *   NVIDIA GPU with CUDA and cuDNN installed (for GPU acceleration). CPU-only mode is supported but very slow.
-
-2.  **Clone the repository (if you haven't already):**
+1.  **Prerequisites:** Python 3.8+, Git, CUDA/cuDNN for NVIDIA GPUs.
+2.  **Clone the Repository:** `git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git` (use the main project URL or your fork).
+3.  **Virtual Environment & Dependencies:**
     ```bash
-    # git clone https://github.com/yourusername/your-repo-name.git
-    # cd your-repo-name
-    ```
-
-3.  **Create a virtual environment (recommended):**
-    ```bash
+    cd YOUR_REPO
     python -m venv venv
-    source venv/bin/activate  # Linux/macOS
-    # venv\Scripts\activate    # Windows
-    ```
+    source venv/bin/activate  # Linux/macOS OR venv\Scripts\activate # Windows
 
-4.  **Install dependencies:**
-    ```bash
-    # Ensure PyTorch is installed with CUDA support if applicable.
-    # Visit https://pytorch.org/get-started/locally/ for the correct pip/conda command for your system.
+    # Install PyTorch with CUDA (see https://pytorch.org/get-started/locally/)
     # Example for CUDA 11.8:
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-    # For other CUDA versions (e.g., 12.1), replace cu118 with cu121.
-
-    # Install other dependencies:
-    pip install diffusers transformers accelerate gradio Pillow bitsandbytes
+    # Install other dependencies
+    pip install diffusers transformers accelerate gradio Pillow bitsandbytes basicsr realesrgan
     ```
-    *   `bitsandbytes` is optional but recommended for potential 8-bit optimizations.
-
-5.  **Run the Gradio app:**
+4.  **Run the App:**
     ```bash
     python app.py
     ```
-    Or using the Gradio CLI:
+    Or with Gradio CLI: `gradio app.py`
+    Use `python app.py --help` for command-line options (e.g., `--model_id`, `--port`, `--no-default_upscale`).
+
+### 3. FastAPI Server (`api.py`) - Optional
+
+For programmatic image generation.
+
+1.  **Install API Dependencies:**
     ```bash
-    gradio app.py
+    pip install fastapi uvicorn[standard] python-multipart Pillow
     ```
-    The `app.py` script supports several command-line arguments for configuration. Use `python app.py --help` to see all options:
-    *   `--model_id`: Specify the HuggingFace model ID (e.g., `"stabilityai/stable-diffusion-2-1-base"`).
-    *   `--port`: Set the port for the Gradio app (default: 7860).
-    *   `--share`: Create a public Gradio link (useful for sharing access temporarily).
-    *   `--cpu`: Force CPU usage (generation will be very slow).
-    *   `--no_float16`: Disable float16 precision (uses float32, may increase VRAM usage but can help with some GPUs/models).
-    *   `--attention_slicing`: Enable attention slicing to reduce VRAM usage (may slightly slow down generation).
-    *   `--allow_model_change`: (Experimental) Adds a UI option to change the loaded model ID dynamically.
-
-    Once started, access the UI by opening the provided local URL (e.g., `http://127.0.0.1:7860`) in your browser.
-
-### 3. API Usage (`api.py`) - Optional
-
-For programmatic image generation, a FastAPI server is included.
-
-1.  **Install API dependencies:**
-    (Ensure base dependencies like `torch`, `diffusers`, `Pillow` from the Gradio app setup are also installed in the same environment.)
-    ```bash
-    pip install fastapi uvicorn[standard] python-multipart
-    ```
-
-2.  **Run the API server:**
-    From the repository root directory:
+    (Ensure base dependencies from `app.py` setup are also installed.)
+2.  **Run API Server:**
     ```bash
     python api.py
     ```
-    Or with Uvicorn for more control (recommended for development/production):
-    ```bash
-    uvicorn api:app --reload --host 0.0.0.0 --port 8000
-    ```
-    The API loads the model specified by the `API_DEFAULT_MODEL_ID` environment variable (defaults to `runwayml/stable-diffusion-v1-5`) on startup.
+    Or with Uvicorn: `uvicorn api:app --reload --host 0.0.0.0 --port 8000`
+3.  **Endpoints:**
+    *   `GET /health/`: Status of API and models.
+    *   `POST /generate/`: Generate image. Request body example:
+        ```json
+        {
+            "prompt": "ethereal jellyfish floating in a nebula, astrophotography",
+            "negative_prompt": "blurry, noise, text",
+            "style_name": "Realistic",
+            "dimensions_str": "1024x1024",
+            "num_inference_steps": 28,
+            "guidance_scale": 7.5,
+            "seed": -1,
+            "upscale_active": true
+        }
+        ```
+4.  **Environment Variables for `api.py` (see `api.py` comments for more):**
+    *   `API_SDXL_MODEL_ID`, `API_SD15_MODEL_ID`: Set preferred SDXL and fallback SD1.5 models.
+    *   `API_USE_FLOAT16`, `API_ATTENTION_SLICING`.
+    *   `API_HOST`, `API_PORT`, `API_RELOAD`.
 
-3.  **API Endpoints:**
-    *   **`POST /generate/`**: Generates an image.
-        *   **Request Body (JSON):**
-            ```json
-            {
-                "prompt": "A serene bioluminescent forest at night, mystical creatures",
-                "negative_prompt": "daytime, city, people, harsh lighting",
-                "style_name": "Fantasy Art", // Valid style from STYLE_PRESETS or "None"
-                "num_inference_steps": 30,   // e.g., 10-100
-                "guidance_scale": 7.0,       // e.g., 1.0-20.0
-                "seed": 98765                // Optional; random if omitted or < 0
-            }
-            ```
-        *   **Success Response:** `200 OK` with the generated image as `image/png`.
-        *   **Error Responses:** `400 Bad Request` (e.g., invalid `style_name`), `503 Service Unavailable` (model not loaded), `500 Internal Server Error` (generation issues).
-    *   **`GET /health/`**: Health check. Returns JSON with API status, loaded model info, and system details.
+## ⚙️ Model & Upscaler Configuration
 
-4.  **Environment Variables for `api.py`:**
-    *   `API_DEFAULT_MODEL_ID`: Model ID for API startup (e.g., `"stabilityai/sdxl-base-1.0"`).
-    *   `API_USE_FLOAT16`: `true` (default) or `false` for float16 precision.
-    *   `API_ATTENTION_SLICING`: `true` (default) or `false` for attention slicing.
-    *   `API_HOST`: Host for Uvicorn (default: `0.0.0.0`).
-    *   `API_PORT`: Port for Uvicorn (default: `8000`).
-    *   `API_RELOAD`: `true` (default) or `false` for Uvicorn's auto-reload feature.
+-   **Diffusion Models:**
+    -   The system prioritizes SDXL models (default: `stabilityai/sdxl-base-1.0`) for higher quality.
+    -   If an SDXL model fails to load (common on lower-VRAM GPUs like Colab's T4), it automatically falls back to Stable Diffusion 1.5 (default: `runwayml/stable-diffusion-v1-5`).
+    -   You can configure the preferred SDXL and fallback SD1.5 model IDs:
+        -   **Colab (`main.ipynb`):** Edit variables in Cell 4 (Load Main Diffusion Model).
+        -   **Local App (`app.py`):** Use `--model_id` (this becomes the preferred model). The fallback is hardcoded in `app.py` but could be made a CLI arg.
+        -   **API (`api.py`):** Set `API_SDXL_MODEL_ID` and `API_SD15_MODEL_ID` environment variables.
+-   **Real-ESRGAN Upscaler:**
+    -   Uses `RealESRGAN_x4plus` by default for general-purpose x4 upscaling.
+    -   This is integrated into `main.ipynb` and `app.py` (toggleable via UI) and `api.py` (toggleable via request flag).
+    -   Upscaling significantly increases detail but also processing time and memory usage.
 
-    Example of running with an environment variable:
-    ```bash
-    API_DEFAULT_MODEL_ID="stabilityai/stable-diffusion-2-1-base" python api.py
-    ```
+## VRAM Considerations
 
-## ⚙️ Model Configuration
-
--   **Default Model:** `runwayml/stable-diffusion-v1-5` is the default for its balance of quality and resource efficiency, making it suitable for free Colab T4 GPUs.
--   **Changing Models:** You can use other models from Hugging Face Hub.
-    -   **Colab (`main.ipynb`):** Edit the `MODEL_TO_LOAD` variable in Cell 4.
-    -   **Local App (`app.py`):** Use the `--model_id` command-line argument. The experimental UI option for model changing (if enabled with `--allow_model_change`) also allows this.
-    -   **API (`api.py`):** Set the `API_DEFAULT_MODEL_ID` environment variable before starting the server.
--   **SDXL Models:** Models like `stabilityai/sdxl-base-1.0` generally produce higher-quality images but require significantly more VRAM (typically >12-16GB). They may not run on standard free Colab T4 GPUs or systems with limited GPU memory. Ensure your hardware is sufficient if you choose to use SDXL models.
+-   **SDXL models** are demanding (typically 12GB+ VRAM for 1024x1024). On a Colab T4 (15GB VRAM), 1024x1024 SDXL generation is possible but can be slow and close to VRAM limits. Upscaling an SDXL 1024x1024 image to 4096x4096 will require substantial VRAM and might fail on a T4.
+-   **SD 1.5 models** are much lighter (4-6GB VRAM for 512x512).
+-   The system uses `torch.float16` and attention slicing by default to optimize VRAM.
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome! Please feel free to fork the repository, make your changes, and submit a pull request. If you encounter any problems or have suggestions, please open an issue on GitHub.
+Your contributions, issues, and feature ideas are highly welcome! Feel free to fork, modify, and submit pull requests.
 
 ## 📜 License
 
-This project is open-sourced under the MIT License. (If a `LICENSE` file is not present in the repository, consider adding one with the standard MIT License text.)
+This project is open-sourced under the MIT License. (Please include a `LICENSE` file with MIT License text in your repository if one does not already exist.)
