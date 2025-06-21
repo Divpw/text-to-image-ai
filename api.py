@@ -8,206 +8,278 @@ import torch
 import random
 import time
 import os
+import sys
+import numpy as np
+import cv2 # For RealESRGAN
+import traceback
 
-# Attempt to import necessary components from app.py or define them here
-# This assumes app.py has these defined at the top level or in a way that's importable.
-# If app.py is primarily a script, we might need to duplicate or refactor them into a shared utils.py
+# --- Real-ESRGAN Upscaler Imports ---
 try:
-    from app import STYLE_PRESETS, apply_style, load_model as load_diffusion_model, current_model_id as app_current_model_id, pipe as app_pipe, DEFAULT_MODEL_ID
+    from realesrgan import RealESRGANer
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    REALESRGAN_AVAILABLE_API = True
 except ImportError:
-    print("Warning: Could not import directly from app.py. Redefining necessary components for API.")
-    # Redefine if import fails (e.g., if app.py is not in PYTHONPATH or has script-like execution guards)
-    DEFAULT_MODEL_ID = "runwayml/stable-diffusion-v1-5"
+    print("API Warning: RealESRGAN dependencies not found. Upscaling will be disabled in API.")
+    REALESRGAN_AVAILABLE_API = False
+    RealESRGANer = None
+    RRDBNet = None
+
+# --- Configuration & Global State ---
+# Attempt to import from app.py, otherwise define locally
+try:
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from app import (
+        STYLE_PRESETS as APP_STYLE_PRESETS,
+        apply_style as app_apply_style,
+        parse_dimensions as app_parse_dimensions,
+        PREFERRED_SDXL_MODEL_ID as APP_PREFERRED_SDXL_MODEL_ID,
+        FALLBACK_SD15_MODEL_ID as APP_FALLBACK_SD15_MODEL_ID
+    )
+    STYLE_PRESETS = APP_STYLE_PRESETS
+    apply_style = app_apply_style
+    parse_dimensions = app_parse_dimensions
+    # API will use its own model ID variables, but can default to app's
+    API_PREFERRED_SDXL_MODEL_ID = os.getenv("API_SDXL_MODEL_ID", APP_PREFERRED_SDXL_MODEL_ID)
+    API_FALLBACK_SD15_MODEL_ID = os.getenv("API_SD15_MODEL_ID", APP_FALLBACK_SD15_MODEL_ID)
+    print("API: Successfully imported some shared components from app.py.")
+except ImportError as e:
+    print(f"API Warning: Could not import from app.py ({e}). Redefining components for API.")
+    API_PREFERRED_SDXL_MODEL_ID = os.getenv("API_SDXL_MODEL_ID", "stabilityai/sdxl-base-1.0")
+    API_FALLBACK_SD15_MODEL_ID = os.getenv("API_SD15_MODEL_ID", "runwayml/stable-diffusion-v1-5")
     STYLE_PRESETS = {
         "None": {"prompt_suffix": "", "negative_prompt_prefix": ""},
-        "Realistic": {"prompt_suffix": "photorealistic, 4k, ultra detailed, cinematic lighting", "negative_prompt_prefix": "cartoon, anime, drawing, sketch, stylized"},
-        "Anime": {"prompt_suffix": "anime style, key visual, vibrant, beautiful, detailed", "negative_prompt_prefix": "photorealistic, 3d render"},
-        # Add more styles if needed, keep consistent with app.py
+        "Realistic": {"prompt_suffix": "photorealistic, 4k, ultra detailed", "negative_prompt_prefix": "cartoon, anime"},
+        "Cyberpunk": {"prompt_suffix": "cyberpunk, neon lights, futuristic", "negative_prompt_prefix": "historical, nature"},
+        "Anime": {"prompt_suffix": "anime style, key visual, beautiful", "negative_prompt_prefix": "photorealistic, 3d"},
+        "Watercolor": {"prompt_suffix": "watercolor painting, soft wash", "negative_prompt_prefix": "photorealistic, harsh lines"},
+        "3D Render": {"prompt_suffix": "3d render, octane render, detailed", "negative_prompt_prefix": "2d, painting"},
     }
     def apply_style(prompt, style_name):
         if style_name == "None" or style_name not in STYLE_PRESETS: return prompt, ""
-        preset = STYLE_PRESETS[style_name]; return f"{prompt}, {preset['prompt_suffix']}", preset['negative_prompt_prefix']
+        preset = STYLE_PRESETS[style_name]
+        styled_p = f"{prompt.strip()}, {preset['prompt_suffix']}" if prompt.strip() else preset['prompt_suffix']
+        return styled_p.strip(", "), preset['negative_prompt_prefix'].strip(", ")
+    def parse_dimensions(dim_string):
+        try: w, h = map(int, dim_string.split('x')); return w, h
+        except: return 1024, 1024 # Default for API if parsing fails (SDXL focus)
 
-    # Simplified model loader for API context (can be expanded)
-    from diffusers import StableDiffusionPipeline, EulerDiscreteScheduler, AutoPipelineForText2Image
-    app_pipe = None
-    app_current_model_id = None
+from diffusers import StableDiffusionPipeline, EulerDiscreteScheduler, AutoPipelineForText2Image # Always needed
 
-    def load_diffusion_model(model_id_to_load=DEFAULT_MODEL_ID, use_float16=True, use_attention_slicing=False, status_update_fn=None):
-        global app_pipe, app_current_model_id
-        if app_pipe is not None and app_current_model_id == model_id_to_load:
-            if status_update_fn: status_update_fn(f"API: Model '{model_id_to_load}' already loaded.")
-            return True # Indicate loaded
-
-        if status_update_fn: status_update_fn(f"API: Loading model: {model_id_to_load}...")
-        pipeline_args = {}
-        if torch.cuda.is_available() and use_float16: pipeline_args["torch_dtype"] = torch.float16
-
-        model_is_sdxl = "sdxl" in model_id_to_load.lower()
-        try:
-            if model_is_sdxl:
-                app_pipe = AutoPipelineForText2Image.from_pretrained(model_id_to_load, **pipeline_args)
-            else:
-                scheduler = EulerDiscreteScheduler.from_pretrained(model_id_to_load, subfolder="scheduler")
-                pipeline_args["scheduler"] = scheduler
-                app_pipe = StableDiffusionPipeline.from_pretrained(model_id_to_load, **pipeline_args)
-
-            if torch.cuda.is_available(): app_pipe.to("cuda")
-            if use_attention_slicing and hasattr(app_pipe, "enable_attention_slicing"): app_pipe.enable_attention_slicing()
-
-            app_current_model_id = model_id_to_load
-            if status_update_fn: status_update_fn(f"API: Model '{model_id_to_load}' loaded successfully.")
-            return True
-        except Exception as e:
-            if status_update_fn: status_update_fn(f"API: Error loading model '{model_id_to_load}': {e}")
-            app_pipe = None; app_current_model_id = None; return False
+# API's own model instances
+api_pipe = None
+api_current_model_id = None
+api_loaded_model_type = None # 'sdxl' or 'sd1.5'
+api_upscaler_instance = None
+REALESRGAN_API_MODEL_NAME = 'RealESRGAN_x4plus'
+REALESRGAN_API_SCALE = 4
 
 
-# --- FastAPI App Setup ---
-app = FastAPI(title="Stable Diffusion Image Generation API", version="0.1.0")
+# --- API Model Loading Logic ---
+def load_api_diffusion_pipeline(model_id, is_sdxl, use_float16, use_attention_slicing, status_fn):
+    global api_pipe # Modifies API's global pipe
 
-# --- Pydantic Models for Request Body ---
-class GenerationRequest(BaseModel):
-    prompt: str = Field(..., example="A hyperrealistic cat astronaut on the moon")
-    negative_prompt: str = Field("", example="blurry, low quality, text, watermark")
-    style_name: str = Field("None", example="Realistic")
-    num_inference_steps: int = Field(25, ge=10, le=100)
-    guidance_scale: float = Field(7.5, ge=1.0, le=20.0)
-    seed: int = Field(None, description="Optional seed for reproducibility. If None, random seed is used.")
-    # model_id: str = Field(DEFAULT_MODEL_ID, description="Specify model if different from loaded one. Requires model reloading.") # Future: allow model change
+    args = {"torch_dtype": torch.float16} if torch.cuda.is_available() and use_float16 else {}
+    status_fn(f"API: Loading {'SDXL' if is_sdxl else 'non-SDXL'} model: {model_id} with float16={use_float16}")
 
-# --- API State ---
-api_model_loaded = False
-API_MODEL_ID = os.getenv("API_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID) # Use environment variable or default
-
-# --- Event Handlers ---
-@app.on_event("startup")
-async def startup_event():
-    global api_model_loaded, API_MODEL_ID
-    print("API Startup: Attempting to load model...")
-    # Determine if float16 and attention slicing should be used (can be from env vars or defaults)
-    use_fp16_env = os.getenv("API_USE_FLOAT16", "true").lower() == "true"
-    use_attn_slicing_env = os.getenv("API_ATTENTION_SLICING", "false").lower() == "true"
-
-    api_model_loaded = load_diffusion_model(
-        model_id_to_load=API_MODEL_ID,
-        use_float16=use_fp16_env,
-        use_attention_slicing=use_attn_slicing_env,
-        status_update_fn=print # Print status to console
-    )
-    if not api_model_loaded:
-        print(f"API Startup: CRITICAL - Model '{API_MODEL_ID}' failed to load. API may not function.")
+    if is_sdxl:
+        api_pipe = AutoPipelineForText2Image.from_pretrained(model_id, **args)
     else:
-        print(f"API Startup: Model '{API_MODEL_ID}' loaded. API is ready.")
+        scheduler = EulerDiscreteScheduler.from_pretrained(model_id, subfolder="scheduler")
+        args["scheduler"] = scheduler
+        api_pipe = StableDiffusionPipeline.from_pretrained(model_id, **args)
 
-# --- API Endpoints ---
-@app.post("/generate/", response_class=StreamingResponse)
-async def generate_image_api(request: GenerationRequest):
-    global app_pipe, app_current_model_id # Use the (potentially imported) pipe and model_id
+    if torch.cuda.is_available(): api_pipe.to("cuda")
+    if use_attention_slicing and hasattr(api_pipe, "enable_attention_slicing"):
+        api_pipe.enable_attention_slicing()
+        status_fn(f"API: Attention slicing enabled for {model_id}.")
+    return model_id, "sdxl" if is_sdxl else "sd1.5"
 
-    if not api_model_loaded or app_pipe is None:
-        raise HTTPException(status_code=503, detail=f"Model '{API_MODEL_ID}' is not loaded or failed to load. API unavailable.")
+def load_api_diffusion_model_with_fallback(preferred_id, fallback_id, use_fp16, use_attn_slicing, status_fn):
+    global api_pipe, api_current_model_id, api_loaded_model_type
 
-    print(f"API Request: Prompt='{request.prompt}', Style='{request.style_name}', Seed='{request.seed}'")
-
-    styled_prompt, style_negative_prefix = apply_style(request.prompt, request.style_name)
-    if style_negative_prefix and request.negative_prompt:
-        final_negative_prompt = f"{style_negative_prefix}, {request.negative_prompt}"
-    elif style_negative_prefix:
-        final_negative_prompt = style_negative_prefix
-    else:
-        final_negative_prompt = request.negative_prompt
-
-    current_seed = request.seed if request.seed is not None else random.randint(0, 2**32 - 1)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    generator = torch.Generator(device).manual_seed(current_seed)
-
-    generation_args = {
-        "prompt": styled_prompt,
-        "negative_prompt": final_negative_prompt if final_negative_prompt else None,
-        "num_inference_steps": int(request.num_inference_steps),
-        "guidance_scale": float(request.guidance_scale),
-        "generator": generator
-    }
-
+    is_preferred_sdxl = "sdxl" in preferred_id.lower()
     try:
-        print(f"API: Generating image with model {app_current_model_id}...")
-        start_time = time.time()
+        api_current_model_id, api_loaded_model_type = load_api_diffusion_pipeline(preferred_id, is_preferred_sdxl, use_fp16, use_attn_slicing, status_fn)
+        status_fn(f"API: Successfully loaded preferred model: {api_current_model_id} ({api_loaded_model_type})")
+        return True
+    except Exception as e_pref:
+        status_fn(f"API: Failed to load preferred model '{preferred_id}': {e_pref}. Trying fallback.")
+        traceback.print_exc()
+        api_pipe = None
+        if fallback_id:
+            try:
+                api_current_model_id, api_loaded_model_type = load_api_diffusion_pipeline(fallback_id, False, use_fp16, use_attn_slicing, status_fn) # Fallback assumed non-SDXL if not specified
+                status_fn(f"API: Successfully loaded fallback model: {api_current_model_id} ({api_loaded_model_type})")
+                return True
+            except Exception as e_fall:
+                status_fn(f"API: Failed to load fallback model '{fallback_id}': {e_fall}")
+                traceback.print_exc()
+    api_current_model_id, api_loaded_model_type = None, None
+    return False
 
-        # Ensure using the correct data type for the loaded pipe
-        if device == "cuda" and hasattr(app_pipe, 'torch_dtype') and app_pipe.torch_dtype == torch.float16:
-            with torch.autocast("cuda"):
-                pil_image = app_pipe(**generation_args).images[0]
-        else:
-            pil_image = app_pipe(**generation_args).images[0]
+def load_api_upscaler(status_fn):
+    global api_upscaler_instance
+    if not REALESRGAN_AVAILABLE_API:
+        status_fn("API: RealESRGAN unavailable, upscaling disabled.")
+        return False
+    if api_upscaler_instance: return True
+
+    status_fn(f"API: Loading RealESRGAN: {REALESRGAN_API_MODEL_NAME}...")
+    try:
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=REALESRGAN_API_SCALE)
+        half = torch.cuda.is_available()
+        api_upscaler_instance = RealESRGANer(
+            scale=REALESRGAN_API_SCALE, model_path=None, model=model, dni_weight=None,
+            model_name=REALESRGAN_API_MODEL_NAME, tile=0, tile_pad=10, pre_pad=0,
+            half=half, gpu_id=0 if half else None
+        )
+        status_fn("API: RealESRGAN upscaler loaded.")
+        return True
+    except Exception as e:
+        status_fn(f"API: Error loading RealESRGAN: {e}")
+        traceback.print_exc()
+        api_upscaler_instance = None
+        return False
+
+def upscale_api_image(pil_img):
+    if not api_upscaler_instance: return pil_img
+    cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    try:
+        output_cv, _ = api_upscaler_instance.enhance(cv_img, outscale=REALESRGAN_API_SCALE)
+        return Image.fromarray(cv2.cvtColor(output_cv, cv2.COLOR_BGR2RGB))
+    except Exception as e:
+        print(f"API: Upscaling error: {e}"); traceback.print_exc()
+        return pil_img
+
+
+# --- FastAPI App ---
+app = FastAPI(title="Ultra Professional Image Generation API", version="1.0.0")
+api_models_loaded_successfully = False
+
+@app.on_event("startup")
+async def startup_api_models():
+    global api_models_loaded_successfully
+    print_status = lambda msg: print(f"[API Startup] {msg}") # Simple console logger for startup
+
+    use_fp16 = os.getenv("API_USE_FLOAT16", "true").lower() == "true"
+    use_attn_slicing = os.getenv("API_ATTENTION_SLICING", "true").lower() == "true"
+
+    diffusion_loaded = load_api_diffusion_model_with_fallback(
+        API_PREFERRED_SDXL_MODEL_ID, API_FALLBACK_SD15_MODEL_ID,
+        use_fp16, use_attn_slicing, print_status
+    )
+    upscaler_loaded = False
+    if REALESRGAN_AVAILABLE_API:
+        upscaler_loaded = load_api_upscaler(print_status)
+
+    api_models_loaded_successfully = diffusion_loaded # At least diffusion model must load
+    if api_models_loaded_successfully:
+        print_status(f"Diffusion model '{api_current_model_id}' ready.")
+        if upscaler_loaded: print_status("Upscaler ready.")
+        else: print_status("Upscaler not loaded/available.")
+    else:
+        print_status("CRITICAL: No diffusion model could be loaded. API will be impaired.")
+
+class GenerationRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, example="A hyperrealistic cat astronaut on the moon, detailed fur, cosmic background")
+    negative_prompt: str = Field("", example="blurry, low quality, text, watermark, human")
+    style_name: str = Field("Realistic", example="Realistic")
+    dimensions_str: str = Field("1024x1024", example="1024x1024", description="WxH format, e.g., 512x512, 1024x1024")
+    num_inference_steps: int = Field(25, ge=10, le=50)
+    guidance_scale: float = Field(7.0, ge=1.0, le=15.0)
+    seed: int = Field(-1, description="Seed for reproducibility. -1 for random.")
+    upscale_active: bool = Field(True, description="Enable Real-ESRGAN x4 upscaling.")
+
+@app.post("/generate/", response_class=StreamingResponse)
+async def generate_image_endpoint(request: GenerationRequest):
+    if not api_models_loaded_successfully or not api_pipe:
+        raise HTTPException(status_code=503, detail="Diffusion model not available.")
+
+    if request.style_name not in STYLE_PRESETS:
+        raise HTTPException(status_code=400, detail=f"Invalid style: {request.style_name}. Available: {list(STYLE_PRESETS.keys())}")
+
+    width, height = parse_dimensions(request.dimensions_str)
+
+    # Basic dimension check for API (could be more sophisticated)
+    if api_loaded_model_type == "sd1.5" and (width > 768 or height > 768):
+         print(f"API Warning: SD1.5 requested with {width}x{height}. May be unstable. Max 768px recommended for SD1.5.")
+    elif api_loaded_model_type == "sdxl" and (width < 768 or height < 768):
+         print(f"API Warning: SDXL requested with {width}x{height}. Suboptimal results likely below 768px (1024px ideal).")
+
+
+    styled_prompt, style_neg = apply_style(request.prompt, request.style_name)
+    final_neg_prompt = request.negative_prompt
+    if style_neg: final_neg_prompt = f"{style_neg}, {final_neg_prompt}" if final_neg_prompt else style_neg
+
+    actual_seed = request.seed if request.seed != -1 else random.randint(0, 2**32 - 1)
+    generator = torch.Generator("cuda" if torch.cuda.is_available() else "cpu").manual_seed(actual_seed)
+
+    params = {"prompt": styled_prompt, "negative_prompt": final_neg_prompt or None,
+              "num_inference_steps": request.num_inference_steps, "guidance_scale": request.guidance_scale,
+              "generator": generator, "width": width, "height": height}
+    try:
+        start_time = time.time()
+        print(f"API: Generating {width}x{height} image for prompt: '{styled_prompt[:50]}...' Seed: {actual_seed}")
+        with torch.autocast("cuda", enabled=torch.cuda.is_available()):
+            img = api_pipe(**params).images[0]
+
+        logs = [f"Initial image {img.width}x{img.height} generated."]
+
+        if request.upscale_active:
+            if REALESRGAN_AVAILABLE_API and api_upscaler_instance:
+                print("API: Upscaling image...")
+                img = upscale_api_image(img)
+                logs.append(f"Image upscaled to {img.width}x{img.height}.")
+            elif REALESRGAN_AVAILABLE_API and not api_upscaler_instance: # Attempt to load if missing
+                print("API: Upscaler not loaded, trying to load now for this request...")
+                if load_api_upscaler(print) and api_upscaler_instance:
+                     img = upscale_api_image(img); logs.append(f"Image upscaled to {img.width}x{img.height} (adhoc load).")
+                else: logs.append("API: Upscaling skipped, upscaler failed to load adhoc.")
+            else: logs.append("API: Upscaling skipped, RealESRGAN not available.")
+        else: logs.append("API: Upscaling disabled by request.")
 
         end_time = time.time()
-        print(f"API: Image generated in {end_time - start_time:.2f} seconds. Seed used: {current_seed}")
+        print(f"API: Total processing time: {end_time - start_time:.2f}s. Final size: {img.width}x{img.height}")
 
-        # Convert PIL image to bytes
         img_byte_arr = io.BytesIO()
-        pil_image.save(img_byte_arr, format="PNG")
-        img_byte_arr.seek(0) # Reset stream position
+        img.save(img_byte_arr, format="PNG")
+        img_byte_arr.seek(0)
 
-        # Suggest a filename (optional, client might ignore)
-        # sane_prompt_prefix = "".join(c if c.isalnum() else "_" for c in styled_prompt[:20])
-        # suggested_filename = f"{sane_prompt_prefix}_{app_current_model_id.split('/')[-1]}_{current_seed}_{time.strftime('%Y%m%d%H%M%S')}.png"
-
-        return StreamingResponse(img_byte_arr, media_type="image/png") #, headers={"Content-Disposition": f"inline; filename=\"{suggested_filename}\""})
+        # Include some generation info in headers (optional)
+        headers = {
+            "X-Seed-Used": str(actual_seed),
+            "X-Model-Used": str(api_current_model_id),
+            "X-Final-Dimensions": f"{img.width}x{img.height}",
+            "X-Upscaled": str(request.upscale_active and img.width > width), # True if upscaling was active AND dimensions changed
+            "X-Generation-Logs": "; ".join(logs) # Simple way to pass some logs
+        }
+        return StreamingResponse(img_byte_arr, media_type="image/png", headers=headers)
 
     except Exception as e:
-        import traceback
         traceback.print_exc()
-        print(f"API: Error during image generation: {e}")
-        raise HTTPException(status_code=500, detail=f"Error during image generation: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Generation error: {str(e)}")
 
 @app.get("/health/")
-async def health_check():
-    model_status = "loaded" if api_model_loaded and app_pipe is not None else "not loaded or error"
+async def health():
     return {
-        "status": "ok",
-        "model_id": app_current_model_id or API_MODEL_ID,
-        "model_status": model_status,
-        "cuda_available": torch.cuda.is_available()
+        "status": "ok" if api_models_loaded_successfully and api_pipe else "error_model_load",
+        "diffusion_model_id": api_current_model_id,
+        "diffusion_model_type": api_loaded_model_type,
+        "upscaler_model_name": REALESRGAN_API_MODEL_NAME if api_upscaler_instance else None,
+        "upscaler_available": REALESRGAN_AVAILABLE_API,
+        "cuda_available": torch.cuda.is_available(),
+        "torch_version": torch.__version__
     }
 
-# --- Main Execution (for running with uvicorn directly) ---
 if __name__ == "__main__":
-    # Configuration for Uvicorn can be set here or passed via CLI
-    # Example: uvicorn api:app --reload --port 8000
-    print("Starting API with Uvicorn...")
-    print(f"Default model for API (can be overridden by env var API_DEFAULT_MODEL_ID): {API_MODEL_ID}")
-    print("To run: uvicorn api:app --reload --host 0.0.0.0 --port 8000")
+    host = os.getenv("API_HOST", "0.0.0.0")
+    port = int(os.getenv("API_PORT", "8000"))
+    reload = os.getenv("API_RELOAD", "true").lower() == "true"
+    log_level = os.getenv("API_LOG_LEVEL", "info")
 
-    # This part is mostly for information; `uvicorn api:app` is the typical way to run.
-    # uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info") # This would block if uncommented
-    # The startup event will handle model loading when Uvicorn starts the app.
-```
+    print(f"Starting API server on {host}:{port}. Reload: {reload}. Log Level: {log_level}")
+    print(f"Default Diffusion Model (env API_SDXL_MODEL_ID): {API_PREFERRED_SDXL_MODEL_ID}")
+    print(f"Fallback Diffusion Model (env API_SD15_MODEL_ID): {API_FALLBACK_SD15_MODEL_ID}")
+    print(f"Upscaler Model: {REALESRGAN_API_MODEL_NAME if REALESRGAN_AVAILABLE_API else 'Not Available'}")
 
-**Explanation of `api.py`:**
-
-1.  **Imports**: Includes FastAPI, Uvicorn, Pydantic for request models, PIL for image handling, and basic Python libraries.
-2.  **Shared Components Import/Redefinition**:
-    *   It *tries* to import `STYLE_PRESETS`, `apply_style`, `load_model` etc., from `app.py`.
-    *   If the import fails (e.g., `app.py` is run as a script and not easily importable as a module, or path issues), it redefines these essential components. This makes `api.py` more robust for standalone execution.
-    *   The model `pipe` and `current_model_id` are aliased as `app_pipe` and `app_current_model_id` to avoid name clashes if imported.
-3.  **FastAPI App Initialization**: `app = FastAPI(...)`.
-4.  **Pydantic Model (`GenerationRequest`)**: Defines the expected structure and types for the POST request body, including default values and validation (e.g., `ge`, `le` for ranges).
-5.  **API State**: `api_model_loaded` flag and `API_MODEL_ID` (configurable via environment variable `API_DEFAULT_MODEL_ID`).
-6.  **Startup Event (`@app.on_event("startup")`)**:
-    *   This function runs when the FastAPI application starts.
-    *   It calls `load_diffusion_model` to load the Stable Diffusion model into memory. This ensures the model is ready before any requests come in.
-    *   Configuration for float16 and attention slicing can also be set via environment variables (`API_USE_FLOAT16`, `API_ATTENTION_SLICING`).
-7.  **`/generate/` Endpoint (`@app.post("/generate/")`)**:
-    *   Accepts a `GenerationRequest`.
-    *   Checks if the model is loaded; if not, returns a 503 error.
-    *   Applies styles, sets up the generator with the seed.
-    *   Calls `app_pipe(**generation_args).images[0]` to generate the image.
-    *   Converts the PIL image to PNG bytes.
-    *   Returns a `StreamingResponse` with `media_type="image/png"`, which sends the image directly to the client.
-    *   Includes error handling for the generation process.
-8.  **`/health/` Endpoint (`@app.get("/health/")`)**: A simple health check endpoint to verify the API is running and if the model is loaded.
-9.  **`if __name__ == "__main__":`**: Provides information on how to run the API using Uvicorn (e.g., `uvicorn api:app --reload --host 0.0.0.0 --port 8000`).
-
-Next, I'll add instructions to `README.md` for running this API.
+    uvicorn.run("api:app", host=host, port=port, reload=reload, log_level=log_level)
