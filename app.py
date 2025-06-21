@@ -238,7 +238,7 @@ def upscale_image(pil_image, progress_callback=None):
 # --- Image Generation ---
 def generate_image_fn(prompt, negative_prompt, style_name, dimensions_str,
                         num_inference_steps, guidance_scale, seed_value,
-                        custom_filename_prefix, upscale_active, progress=gr.Progress(track_ τότε=True)):
+                        custom_filename_prefix, upscale_active, progress=gr.Progress(track_tqdm=True)):
     global pipe, current_model_id, loaded_model_type, upscaler_instance
 
     if pipe is None:
@@ -496,7 +496,7 @@ def create_gradio_interface(args):
         status_textbox.value = "\n".join(initial_status_messages_for_ui) # Set final initial status on the textbox
 
 
-        def on_generate_click_wrapper_app(prompt, neg_prompt, style, dimensions, steps, cfg, seed, filename_prefix, upscale_active_ui, progress=gr.Progress(track_ τότε=True)):
+        def on_generate_click_wrapper_app(prompt, neg_prompt, style, dimensions, steps, cfg, seed, filename_prefix, upscale_active_ui, progress=gr.Progress(track_tqdm=True)):
             # Warn about upscaling on CPU if selected
             current_status_val = status_textbox.value
             if upscale_active_ui and not torch.cuda.is_available() and REALESRGAN_AVAILABLE:
