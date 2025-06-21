@@ -1,3 +1,14 @@
+---
+title: Ultra-Professional AI Image Generation System
+emoji: ✨
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+sdk_version: "3.41.0"
+app_file: app.py
+pinned: false
+---
+
 # Ultra-Professional AI Image Generation System with Stable Diffusion & SDXL
 
 Welcome to an advanced AI image generation system designed for high-quality output and a professional user experience. This project leverages Stable Diffusion (including SDXL models), Real-ESRGAN for upscaling, and offers multiple interfaces: a Google Colab notebook, a local Gradio application, and a FastAPI backend. It's built with a focus on compatibility with free CPU tiers on platforms like Hugging Face Spaces, while also supporting GPU acceleration.
