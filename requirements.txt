@@ -3,6 +3,7 @@ diffusers
 transformers
 accelerate
 gradio
+Pillow
 realesrgan
 basicsr
-Pillow
+opencv-python
